@@ -104,4 +104,37 @@ router.get(
 }
 );
 
+// POST /bikes/by-ids - Get bikes by array of IDs
+router.post("/by-ids", async (req, res) => {
+    try {
+        const { ids } = req.body;
+        
+        if (!Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ error: "Valid IDs array required" });
+        }
+
+        const db = await getDb();
+        const { ObjectId } = await import("mongodb");
+        
+        // Convert string IDs to ObjectId
+        const objectIds = ids.map(id => {
+            try {
+                return new ObjectId(id);
+            } catch (error) {
+                return null;
+            }
+        }).filter(Boolean);
+
+        const bikes = await db
+            .collection("allbikes")
+            .find({ _id: { $in: objectIds } })
+            .toArray();
+
+        res.json(bikes.map(b => ({ ...b, _id: b._id.toString() })));
+    } catch (err) {
+        console.error('Error fetching bikes by IDs:', err);
+        res.status(500).json({ error: "Motorları getirirken bir hata oluştu" });
+    }
+});
+
 export default router;

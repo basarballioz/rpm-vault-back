@@ -8,13 +8,18 @@ import bikesRouter from "../routes/bikes.js";
 import bikeDetailsRouter from "../routes/bikeDetails.js";
 import brandsRouter from "../routes/brands.js";
 import categoriesRouter from "../routes/categories.js";
+import usersRouter from "../routes/users.js";
 import swaggerUi from "swagger-ui-express";
 import hpp from "hpp";
 import slowDown from "express-slow-down";
 import { openapiSpec } from "./openapi.js";
+import { initializeFirebase } from "./firebase.js";
 
 export function createApp() {
     const app = express();
+    
+    // Initialize Firebase Admin
+    initializeFirebase();
 
     app.set("trust proxy", 1);
 
@@ -115,6 +120,7 @@ export function createApp() {
     app.use("/bikes", bikeDetailsRouter);
     app.use("/brands", brandsRouter);
     app.use("/categories", categoriesRouter);
+    app.use("/api/users", usersRouter);
 
     app.get("/openapi.json", (req, res) => res.json(openapiSpec));
     app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));

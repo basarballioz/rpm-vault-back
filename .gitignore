@@ -120,6 +120,15 @@ dist
 # Firebase cache directory
 .firebase/
 
+# Firebase service account (IMPORTANT: Never commit!)
+firebase-service-account.json
+**/firebase-service-account*.json
+
+# Environment variables (IMPORTANT: Never commit!)
+.env
+.env.local
+.env.*.local
+
 # TernJS port file
 .tern-port
 

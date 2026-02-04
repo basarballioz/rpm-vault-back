@@ -233,15 +233,23 @@ router.post('/favorites', authenticateToken, async (req, res) => {
         $setOnInsert: {
           uid: req.user.uid,
           email: req.user.email,
+          displayName: req.user.name,
+          photoURL: req.user.picture,
           createdAt: new Date(),
         }
       },
       { upsert: true }
     );
 
+    // Fetch updated favorites
+    const user = await usersCollection.findOne({ uid: req.user.uid });
+
     res.json({
       success: true,
-      data: { message: 'Added to favorites' },
+      data: { 
+        message: 'Added to favorites',
+        favorites: user?.favorites || []
+      },
     });
   } catch (error) {
     console.error('Error adding favorite:', error);
@@ -278,6 +286,30 @@ router.delete('/favorites/:bikeId', authenticateToken, async (req, res) => {
     
     await usersCollection.updateOne(
       { uid: req.user.uid },
+      { 
+        $pull: { favorites: bikeId },
+        $set: { updatedAt: new Date() }
+      }
+    );
+
+    // Fetch updated favorites
+    const user = await usersCollection.findOne({ uid: req.user.uid });
+
+    res.json({
+      success: true,
+      data: { 
+        message: 'Removed from favorites',
+        favorites: user?.favorites || []
+      },
+    });
+  } catch (error) {
+    console.error('Error removing favorite:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to remove favorite',
+    });
+  }
+});
       { 
         $pull: { favorites: bikeId },
         $set: { updatedAt: new Date() }

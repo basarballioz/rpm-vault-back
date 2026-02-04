@@ -59,6 +59,20 @@ router.get('/profile', authenticateToken, async (req, res) => {
       };
       
       await usersCollection.insertOne(user);
+    } else {
+      // Update photoURL if it's missing but available in Firebase token
+      if (!user.photoURL && req.user.picture) {
+        await usersCollection.updateOne(
+          { uid: req.user.uid },
+          { 
+            $set: { 
+              photoURL: req.user.picture,
+              updatedAt: new Date()
+            } 
+          }
+        );
+        user.photoURL = req.user.picture;
+      }
     }
 
     res.json({

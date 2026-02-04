@@ -310,11 +310,63 @@ router.delete('/favorites/:bikeId', authenticateToken, async (req, res) => {
     });
   }
 });
-      { 
-        $pull: { favorites: bikeId },
-        $set: { updatedAt: new Date() }
-      }
+
+/**
+ * @openapi
+ * /api/users/favorites/sync:
+ *   post:
+ *     tags: [Users]
+ *     summary: Sync local favorites with server
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               favorites:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Favorites synced successfully
+ */
+router.post('/favorites/sync', authenticateToken, async (req, res) => {
+  try {
+    const { favorites } = req.body;
+
+    if (!Array.isArray(favorites)) {
+      return res.status(400).json({
+        success: false,
+        error: 'favorites must be an array',
+      });
+    }
+
+    const db = await getDb();
+    const usersCollection = db.collection('users');
+
+    // Merge local favorites with server favorites
+    await usersCollection.updateOne(
+      { uid: req.user.uid },
+      {
+        $addToSet: { favorites: { $each: favorites } },
+        $set: { updatedAt: new Date() },
+        $setOnInsert: {
+          uid: req.user.uid,
+          email: req.user.email,
+          displayName: req.user.name,
+          photoURL: req.user.picture,
+          createdAt: new Date(),
+        }
+      },
+      { upsert: true }
     );
+
+    // Fetch merged favorites
+    const user = await usersCollection.findOne({ uid: req.user.uid });
 
     res.json({
       success: true,

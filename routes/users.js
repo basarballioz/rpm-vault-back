@@ -174,11 +174,31 @@ router.get('/favorites', authenticateToken, async (req, res) => {
     const db = await getDb();
     const usersCollection = db.collection('users');
     
-    const user = await usersCollection.findOne({ uid: req.user.uid });
-    
+    let user = await usersCollection.findOne({ uid: req.user.uid });
+
+    if (!user) {
+      const now = new Date();
+      const newUser = {
+        uid: req.user.uid,
+        email: req.user.email || null,
+        displayName: req.user.name || null,
+        photoURL: req.user.picture || null,
+        favorites: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      await usersCollection.insertOne(newUser);
+      user = newUser;
+    }
+
+    const favorites = Array.isArray(user?.favorites)
+      ? user.favorites.filter((id) => typeof id === 'string' && id.trim().length > 0)
+      : [];
+
     res.json({
       success: true,
-      data: user?.favorites || [],
+      data: favorites,
     });
   } catch (error) {
     console.error('Error fetching favorites:', error);
@@ -243,12 +263,15 @@ router.post('/favorites', authenticateToken, async (req, res) => {
 
     // Fetch updated favorites
     const user = await usersCollection.findOne({ uid: req.user.uid });
+    const favorites = Array.isArray(user?.favorites)
+      ? user.favorites.filter((id) => typeof id === 'string' && id.trim().length > 0)
+      : [];
 
     res.json({
       success: true,
       data: { 
         message: 'Added to favorites',
-        favorites: user?.favorites || []
+        favorites,
       },
     });
   } catch (error) {
@@ -294,12 +317,15 @@ router.delete('/favorites/:bikeId', authenticateToken, async (req, res) => {
 
     // Fetch updated favorites
     const user = await usersCollection.findOne({ uid: req.user.uid });
+    const favorites = Array.isArray(user?.favorites)
+      ? user.favorites.filter((id) => typeof id === 'string' && id.trim().length > 0)
+      : [];
 
     res.json({
       success: true,
       data: { 
         message: 'Removed from favorites',
-        favorites: user?.favorites || []
+        favorites,
       },
     });
   } catch (error) {
@@ -316,7 +342,7 @@ router.delete('/favorites/:bikeId', authenticateToken, async (req, res) => {
  * /api/users/favorites/sync:
  *   post:
  *     tags: [Users]
- *     summary: Sync local favorites with server
+ *     summary: Merge local favorites with server account
  *     security:
  *       - BearerAuth: []
  *     requestBody:
@@ -345,96 +371,47 @@ router.post('/favorites/sync', authenticateToken, async (req, res) => {
       });
     }
 
+    const sanitizedFavorites = favorites.filter(
+      (id) => typeof id === 'string' && id.trim().length > 0
+    );
+
     const db = await getDb();
     const usersCollection = db.collection('users');
 
-    // Merge local favorites with server favorites
+    const user = await usersCollection.findOne({ uid: req.user.uid });
+    const existingFavorites = Array.isArray(user?.favorites)
+      ? user.favorites.filter((id) => typeof id === 'string' && id.trim().length > 0)
+      : [];
+
+    const mergedFavorites = [...new Set([...existingFavorites, ...sanitizedFavorites])];
+
+    const updateData = {
+      favorites: mergedFavorites,
+      updatedAt: new Date(),
+    };
+
+    if (!user?.displayName && req.user.name) {
+      updateData.displayName = req.user.name;
+    }
+
+    if (!user?.photoURL && req.user.picture) {
+      updateData.photoURL = req.user.picture;
+    }
+
+    if (!user?.email && req.user.email) {
+      updateData.email = req.user.email;
+    }
+
     await usersCollection.updateOne(
       { uid: req.user.uid },
       {
-        $addToSet: { favorites: { $each: favorites } },
-        $set: { updatedAt: new Date() },
+        $set: updateData,
         $setOnInsert: {
           uid: req.user.uid,
-          email: req.user.email,
-          displayName: req.user.name,
-          photoURL: req.user.picture,
-          createdAt: new Date(),
-        }
-      },
-      { upsert: true }
-    );
-
-    // Fetch merged favorites
-    const user = await usersCollection.findOne({ uid: req.user.uid });
-
-    res.json({
-      success: true,
-      data: { message: 'Removed from favorites' },
-    });
-  } catch (error) {
-    console.error('Error removing favorite:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to remove favorite',
-    });
-  }
-});
-
-/**
- * @openapi
- * /api/users/favorites/sync:
- *   post:
- *     tags: [Users]
- *     summary: Sync local favorites to server
- *     security:
- *       - BearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               favorites:
- *                 type: array
- *                 items:
- *                   type: string
- *     responses:
- *       200:
- *         description: Favorites synced successfully
- */
-router.post('/favorites/sync', authenticateToken, async (req, res) => {
-  try {
-    const { favorites } = req.body;
-    
-    if (!Array.isArray(favorites)) {
-      return res.status(400).json({
-        success: false,
-        error: 'favorites must be an array',
-      });
-    }
-
-    const db = await getDb();
-    const usersCollection = db.collection('users');
-    
-    // Get existing favorites
-    const user = await usersCollection.findOne({ uid: req.user.uid });
-    const existingFavorites = user?.favorites || [];
-    
-    // Merge without duplicates
-    const mergedFavorites = [...new Set([...existingFavorites, ...favorites])];
-    
-    await usersCollection.updateOne(
-      { uid: req.user.uid },
-      { 
-        $set: { 
+          email: req.user.email || null,
+          displayName: req.user.name || null,
+          photoURL: req.user.picture || null,
           favorites: mergedFavorites,
-          updatedAt: new Date()
-        },
-        $setOnInsert: {
-          uid: req.user.uid,
-          email: req.user.email,
           createdAt: new Date(),
         }
       },

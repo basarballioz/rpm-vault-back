@@ -36,9 +36,9 @@ export function createApp() {
                 if (!origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
                     return callback(null, true);
                 }
-                return callback(null, true); // In production on Vercel, allow all origins (Vercel headers handle restriction)
+                return callback(new Error("Not allowed by CORS"));
             },
-            credentials: true,
+            credentials: false,
             methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
             allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "X-CSRF-Token"],
         })

@@ -103,7 +103,14 @@ router.get(
                             vars: {
                                 match: {
                                     $regexFind: {
-                                        input: { $ifNull: [field, ""] },
+                                        input: {
+                                            $convert: {
+                                                input: { $ifNull: [field, ""] },
+                                                to: "string",
+                                                onError: "",
+                                                onNull: "",
+                                            },
+                                        },
                                         regex: "[\\d.]+",
                                     },
                                 },
@@ -112,8 +119,8 @@ router.get(
                                 $cond: {
                                     if: { $ne: ["$$match", null] },
                                     then: "$$match.match",
-                                    else: "0"
-                                }
+                                    else: "0",
+                                },
                             },
                         },
                     },

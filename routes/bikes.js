@@ -14,6 +14,7 @@ router.get(
         query("search").optional().isString().trim().isLength({ max: 256 }),
         query("page").optional().isInt({ min: 1, max: 1000000 }).toInt(),
         query("limit").optional().isInt({ min: 1, max: 1000 }).toInt(),
+        query("sort").optional().isString().trim().isLength({ max: 64 }),
     ],
     async (req, res) => {
     try {
@@ -22,7 +23,7 @@ router.get(
             return res.status(400).json({ errors: errors.array() });
         }
         const db = await getDb();
-        const { brand, model, category, search, page = 1, limit = 50 } = req.query;
+        const { brand, model, category, search, page = 1, limit = 50, sort } = req.query;
 
         const collection = db.collection("allbikes");
 
@@ -82,12 +83,101 @@ router.get(
                 }
             }
 
-        const bikes = await collection
-            .find(query)
-            .sort({ Brand: 1, Model: 1 })
-            .skip((parseInt(page) - 1) * parseInt(limit))
-            .limit(parseInt(limit))
-            .toArray();
+        const allowedSorts = new Set([
+            "year-asc",
+            "year-desc",
+            "cc-asc",
+            "cc-desc",
+            "hp-asc",
+            "hp-desc",
+            "name-asc",
+            "name-desc",
+        ]);
+        const sortKey = allowedSorts.has(String(sort || "")) ? String(sort) : null;
+
+        const parseNumberExpr = (field) => ({
+            $toDouble: {
+                $ifNull: [
+                    {
+                        $let: {
+                            vars: {
+                                match: {
+                                    $regexFind: {
+                                        input: { $ifNull: [field, ""] },
+                                        regex: /[\d.]+/,
+                                    },
+                                },
+                            },
+                            in: { $ifNull: ["$$match.match", "0"] },
+                        },
+                    },
+                    "0",
+                ],
+            },
+        });
+
+        const sortFields = {};
+        let sortSpec = { Brand: 1, Model: 1 };
+
+        switch (sortKey) {
+            case "year-asc":
+                sortFields._sortYear = parseNumberExpr("$Year");
+                sortSpec = { _sortYear: 1, Brand: 1, Model: 1 };
+                break;
+            case "year-desc":
+                sortFields._sortYear = parseNumberExpr("$Year");
+                sortSpec = { _sortYear: -1, Brand: 1, Model: 1 };
+                break;
+            case "cc-asc":
+                sortFields._sortCc = parseNumberExpr("$Displacement");
+                sortSpec = { _sortCc: 1, Brand: 1, Model: 1 };
+                break;
+            case "cc-desc":
+                sortFields._sortCc = parseNumberExpr("$Displacement");
+                sortSpec = { _sortCc: -1, Brand: 1, Model: 1 };
+                break;
+            case "hp-asc":
+                sortFields._sortHp = parseNumberExpr("$Power");
+                sortSpec = { _sortHp: 1, Brand: 1, Model: 1 };
+                break;
+            case "hp-desc":
+                sortFields._sortHp = parseNumberExpr("$Power");
+                sortSpec = { _sortHp: -1, Brand: 1, Model: 1 };
+                break;
+            case "name-asc":
+                sortSpec = { Brand: 1, Model: 1 };
+                break;
+            case "name-desc":
+                sortSpec = { Brand: -1, Model: -1 };
+                break;
+            default:
+                sortSpec = { Brand: 1, Model: 1 };
+                break;
+        }
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const limitValue = parseInt(limit);
+        const shouldAggregate = Object.keys(sortFields).length > 0;
+
+        let bikes = [];
+        if (shouldAggregate) {
+            const pipeline = [
+                { $match: query },
+                { $addFields: sortFields },
+                { $sort: sortSpec },
+                { $skip: skip },
+                { $limit: limitValue },
+                { $unset: Object.keys(sortFields) },
+            ];
+            bikes = await collection.aggregate(pipeline).toArray();
+        } else {
+            bikes = await collection
+                .find(query)
+                .sort(sortSpec)
+                .skip(skip)
+                .limit(limitValue)
+                .toArray();
+        }
 
         const total = await collection.countDocuments(query);
 

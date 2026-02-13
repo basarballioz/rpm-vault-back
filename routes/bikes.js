@@ -27,61 +27,63 @@ router.get(
 
         const collection = db.collection("allbikes");
 
-        // Query oluştur
-            const query = {};
-            // Brand filter with multiple values support
-            if (brand) {
-                const brands = String(brand)
-                    .split(",")
-                    .map((b) => b.trim())
-                    .filter(Boolean);
-                if (brands.length === 1) {
-                    query.Brand = { $regex: new RegExp(`^${brands[0]}$`, "i") };
-                } else if (brands.length > 1) {
-                    // Multiple brands - use regex alternation
-                    const brandPattern = brands.map(b => b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-                    query.Brand = { $regex: new RegExp(`^(${brandPattern})$`, "i") };
-                }
+        const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const andConditions = [];
+
+        // Brand filter with multiple values support
+        if (brand) {
+            const brands = String(brand)
+                .split(",")
+                .map((b) => b.trim())
+                .filter(Boolean);
+            if (brands.length === 1) {
+                const rx = new RegExp(`^${escapeRegex(brands[0])}$`, "i");
+                andConditions.push({ $or: [{ brand: { $regex: rx } }, { Brand: { $regex: rx } }] });
+            } else if (brands.length > 1) {
+                const brandPattern = brands.map(escapeRegex).join("|");
+                const rx = new RegExp(`^(${brandPattern})$`, "i");
+                andConditions.push({ $or: [{ brand: { $regex: rx } }, { Brand: { $regex: rx } }] });
             }
-            if (model) query.Model = { $regex: new RegExp(model.trim(), "i") };
-            // Category filter with multiple values support
-            if (category) {
-                const categories = String(category)
-                    .split(",")
-                    .map((c) => c.trim())
-                    .filter(Boolean);
-                if (categories.length === 1) {
-                    query.Category = { $regex: new RegExp(`^${categories[0]}$`, "i") };
-                } else if (categories.length > 1) {
-                    // Multiple categories - use regex alternation
-                    const categoryPattern = categories.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-                    query.Category = { $regex: new RegExp(`^(${categoryPattern})$`, "i") };
-                }
+        }
+
+        if (model) {
+            const rx = new RegExp(escapeRegex(String(model).trim()), "i");
+            andConditions.push({ $or: [{ model: { $regex: rx } }, { Model: { $regex: rx } }] });
+        }
+
+        // Category filter with multiple values support
+        if (category) {
+            const categories = String(category)
+                .split(",")
+                .map((c) => c.trim())
+                .filter(Boolean);
+            if (categories.length === 1) {
+                const rx = new RegExp(`^${escapeRegex(categories[0])}$`, "i");
+                andConditions.push({ $or: [{ category: { $regex: rx } }, { Category: { $regex: rx } }] });
+            } else if (categories.length > 1) {
+                const categoryPattern = categories.map(escapeRegex).join("|");
+                const rx = new RegExp(`^(${categoryPattern})$`, "i");
+                andConditions.push({ $or: [{ category: { $regex: rx } }, { Category: { $regex: rx } }] });
             }
-            // Search support (brand OR model)
-            if (search) {
-                const term = String(search).trim();
-                if (term) {
-                    const rx = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-                    const searchConditions = [
+        }
+
+        // Search support (brand OR model)
+        if (search) {
+            const term = String(search).trim();
+            if (term) {
+                const rx = new RegExp(escapeRegex(term), "i");
+                andConditions.push({
+                    $or: [
+                        { brand: { $regex: rx } },
                         { Brand: { $regex: rx } },
+                        { model: { $regex: rx } },
                         { Model: { $regex: rx } },
-                    ];
-                    // If we already have filters, we need to AND them with the search
-                    if (Object.keys(query).length > 0) {
-                        const existingQuery = { ...query };
-                        query.$and = [
-                            existingQuery,
-                            { $or: searchConditions }
-                        ];
-                        Object.keys(existingQuery).forEach(key => {
-                            if (key !== '$and') delete query[key];
-                        });
-                    } else {
-                        query.$or = searchConditions;
-                    }
-                }
+                    ],
+                });
             }
+        }
+
+        const query = andConditions.length > 0 ? { $and: andConditions } : {};
 
         const allowedSorts = new Set([
             "year-asc",
@@ -95,7 +97,7 @@ router.get(
         ]);
         const sortKey = allowedSorts.has(String(sort || "")) ? String(sort) : null;
 
-        const parseNumberExpr = (field) => ({
+        const parseNumberExpr = (input) => ({
             $toDouble: {
                 $ifNull: [
                     {
@@ -105,7 +107,7 @@ router.get(
                                     $regexFind: {
                                         input: {
                                             $convert: {
-                                                input: { $ifNull: [field, ""] },
+                                                input: { $ifNull: [input, ""] },
                                                 to: "string",
                                                 onError: "",
                                                 onNull: "",
@@ -129,42 +131,45 @@ router.get(
             },
         });
 
-        const sortFields = {};
-        let sortSpec = { Brand: 1, Model: 1 };
+        const sortFields = {
+            _sortBrand: { $ifNull: ["$brand", "$Brand"] },
+            _sortModel: { $ifNull: ["$model", "$Model"] },
+        };
+        let sortSpec = { _sortBrand: 1, _sortModel: 1 };
 
         switch (sortKey) {
             case "year-asc":
-                sortFields._sortYear = parseNumberExpr("$Year");
-                sortSpec = { _sortYear: 1, Brand: 1, Model: 1 };
+                sortFields._sortYear = parseNumberExpr({ $ifNull: ["$year", "$Year"] });
+                sortSpec = { _sortYear: 1, _sortBrand: 1, _sortModel: 1 };
                 break;
             case "year-desc":
-                sortFields._sortYear = parseNumberExpr("$Year");
-                sortSpec = { _sortYear: -1, Brand: 1, Model: 1 };
+                sortFields._sortYear = parseNumberExpr({ $ifNull: ["$year", "$Year"] });
+                sortSpec = { _sortYear: -1, _sortBrand: 1, _sortModel: 1 };
                 break;
             case "cc-asc":
-                sortFields._sortCc = parseNumberExpr("$Displacement");
-                sortSpec = { _sortCc: 1, Brand: 1, Model: 1 };
+                sortFields._sortCc = parseNumberExpr({ $ifNull: ["$displacement", "$Displacement"] });
+                sortSpec = { _sortCc: 1, _sortBrand: 1, _sortModel: 1 };
                 break;
             case "cc-desc":
-                sortFields._sortCc = parseNumberExpr("$Displacement");
-                sortSpec = { _sortCc: -1, Brand: 1, Model: 1 };
+                sortFields._sortCc = parseNumberExpr({ $ifNull: ["$displacement", "$Displacement"] });
+                sortSpec = { _sortCc: -1, _sortBrand: 1, _sortModel: 1 };
                 break;
             case "hp-asc":
-                sortFields._sortHp = parseNumberExpr("$Power");
-                sortSpec = { _sortHp: 1, Brand: 1, Model: 1 };
+                sortFields._sortHp = parseNumberExpr({ $ifNull: ["$hp", "$Power"] });
+                sortSpec = { _sortHp: 1, _sortBrand: 1, _sortModel: 1 };
                 break;
             case "hp-desc":
-                sortFields._sortHp = parseNumberExpr("$Power");
-                sortSpec = { _sortHp: -1, Brand: 1, Model: 1 };
+                sortFields._sortHp = parseNumberExpr({ $ifNull: ["$hp", "$Power"] });
+                sortSpec = { _sortHp: -1, _sortBrand: 1, _sortModel: 1 };
                 break;
             case "name-asc":
-                sortSpec = { Brand: 1, Model: 1 };
+                sortSpec = { _sortBrand: 1, _sortModel: 1 };
                 break;
             case "name-desc":
-                sortSpec = { Brand: -1, Model: -1 };
+                sortSpec = { _sortBrand: -1, _sortModel: -1 };
                 break;
             default:
-                sortSpec = { Brand: 1, Model: 1 };
+                sortSpec = { _sortBrand: 1, _sortModel: 1 };
                 break;
         }
 
